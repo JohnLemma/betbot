@@ -6,7 +6,6 @@ export interface Player {
 }
 
 export interface GameState {
-  players: Player[];
   currentRound: number;
   drawnNumbers: number[];
   timeRemaining: number;
@@ -16,6 +15,24 @@ export interface GameState {
 
 export interface GameResults {
   winners: Player[];
-  matchedNumbers: number;
   prize: number;
+}
+
+export interface Round {
+  id: number;
+  status: 'active' | 'completed';
+  start_time: string;
+  end_time?: string;
+  prize_pool: number;
+  drawn_numbers?: number[];
+}
+
+export interface Bet {
+  id: number;
+  telegram_id: string;
+  round_id: number;
+  numbers: number[];
+  status: 'pending' | 'won' | 'lost';
+  prize: number;
+  created_at: string;
 }
