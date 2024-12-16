@@ -40,50 +40,54 @@ function App() {
   const [showPreviousNumbers, setShowPreviousNumbers] = useState(true);
 
   useEffect(() => {
-    const initializeGame = () => {
-      const bots = createBotPlayers(37);
-      setGameState(prev => ({
-        ...prev,
-        players: bots,
-        prizePool: bots.length * ENTRY_FEE,
-      }));
-    };
+    // Initial fetch
+    fetchGameState();
 
-    if (gameState.players.length === 0) {
-      initializeGame();
-    }
-
-    const timer = setInterval(() => {
-      setGameState(prev => {
-        if (prev.timeRemaining <= 0) {
-          return prev;
-        }
-        return {
-          ...prev,
-          timeRemaining: prev.timeRemaining - 1,
-        };
-      });
+    // Set up polling every second for more responsive updates
+    const interval = setInterval(() => {
+      fetchGameState();
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (gameState.timeRemaining === 0 && !isDrawing) {
-      handleRoundEnd();
-    }
-  }, [gameState.timeRemaining]);
+  const fetchGameState = async () => {
+    try {
+      const response = await fetch('/api/game?path=get-game-state');
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        const { currentRound, previousRound } = data;
+        
+        // Update game state
+        setGameState(prev => ({
+          ...prev,
+          currentRound: currentRound?.id || 0,
+          timeRemaining: 60, // 1 minute rounds
+          prizePool: currentRound?.prize_pool || 0,
+          drawnNumbers: previousRound?.drawn_numbers || [],
+          isGameActive: true
+        }));
 
-  const handleRoundEnd = async () => {
+        // Update previous winning numbers if available
+        if (previousRound?.drawn_numbers) {
+          setPreviousWinningNumbers(previousRound.drawn_numbers);
+        }
+
+        // If we have new drawn numbers and we're not currently drawing
+        if (previousRound?.drawn_numbers && !isDrawing) {
+          handleNewDrawnNumbers(previousRound.drawn_numbers);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching game state:', error);
+    }
+  };
+
+  const handleNewDrawnNumbers = async (numbers: number[]) => {
     setIsDrawing(true);
     setShowPreviousNumbers(false);
-    const drawn = generateRandomNumbers(NUMBERS_TO_SELECT, TOTAL_NUMBERS);
-    
-    // Save current winning numbers as previous before clearing
-    if (winningNumbers.length > 0) {
-      setPreviousWinningNumbers(winningNumbers);
-    }
-    
+
     // Clear any previous numbers
     setGameState(prev => ({
       ...prev,
@@ -91,47 +95,48 @@ function App() {
     }));
     setWinningNumbers([]);
 
-    // First draw the numbers at the top with animation
-    for (let i = 0; i < NUMBERS_TO_SELECT; i++) {
+    // Animate drawing each number
+    for (let i = 0; i < numbers.length; i++) {
       setGameState(prev => ({
         ...prev,
-        drawnNumbers: [...prev.drawnNumbers, drawn[i]],
+        drawnNumbers: [...prev.drawnNumbers, numbers[i]],
       }));
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // Wait for all animations to complete fully
-    // Last number animation (0.8s) + text fade in (0.4s) + extra buffer (2.3s)
-    await new Promise(resolve => setTimeout(resolve, 3500));
-
-    // Calculate results and show everything after animations
-    const roundResults = determineWinners(gameState.players, drawn);
-    setResults(roundResults);
-    setWinningNumbers(drawn);
+    // Update final state
+    setWinningNumbers(numbers);
     setShowPreviousNumbers(true);
-
-    // Check if current player won
-    const currentPlayer = gameState.players.find(p => !p.isBot);
-    if (currentPlayer && roundResults.winners.includes(currentPlayer)) {
-      setShowWinnerAnimation(true);
-    }
-
-    // Wait a bit before ending the round
-    await new Promise(resolve => setTimeout(resolve, 1000));
     setIsDrawing(false);
+  };
 
-    // Start new round with fresh bots
-    const newBots = createBotPlayers(37);
-    setGameState(prev => ({
-      ...prev,
-      drawnNumbers: drawn,
-      currentRound: prev.currentRound + 1,
-      timeRemaining: ROUND_DURATION,
-      players: newBots,
-      prizePool: newBots.length * ENTRY_FEE,
-    }));
-    
-    setSelectedNumbers([]);
+  const handleJoinGame = async () => {
+    if (selectedNumbers.length === NUMBERS_TO_SELECT && balance >= ENTRY_FEE) {
+      try {
+        const response = await fetch('/api/game', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            path: 'place-bet',
+            body: {
+              telegramId: 'test-user', // Replace with actual user ID
+              numbers: selectedNumbers,
+            },
+          }),
+        });
+
+        const data = await response.json();
+        if (data.status === 'success') {
+          setBalance(prev => prev - ENTRY_FEE);
+          setNumberHistory(selectedNumbers);
+          setBetRound(gameState.currentRound);
+        }
+      } catch (error) {
+        console.error('Error placing bet:', error);
+      }
+    }
   };
 
   const handleNumberSelect = (num: number) => {
@@ -139,26 +144,6 @@ function App() {
       setSelectedNumbers(prev => prev.filter(n => n !== num));
     } else if (selectedNumbers.length < NUMBERS_TO_SELECT) {
       setSelectedNumbers(prev => [...prev, num]);
-    }
-  };
-
-  const handleJoinGame = () => {
-    if (selectedNumbers.length === NUMBERS_TO_SELECT && balance >= ENTRY_FEE) {
-      const newPlayer: Player = {
-        id: `player-${Date.now()}`,
-        name: 'You',
-        selectedNumbers,
-        isBot: false,
-      };
-
-      setBalance(prev => prev - ENTRY_FEE);
-      setGameState(prev => ({
-        ...prev,
-        players: [...prev.players, newPlayer],
-        prizePool: prev.prizePool + ENTRY_FEE,
-      }));
-      setNumberHistory(selectedNumbers);
-      setBetRound(gameState.currentRound);
     }
   };
 
